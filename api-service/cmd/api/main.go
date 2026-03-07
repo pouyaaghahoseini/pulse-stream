@@ -34,6 +34,11 @@ func createPostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if event.EngagementScore < 0 {
+		http.Error(w, "Engagement score must be non-negative", http.StatusBadRequest)
+		return
+	}
+
 	log.Printf("Received post event: %+v\n", event)
 
 	w.Header().Set("Content-Type", "application/json")
