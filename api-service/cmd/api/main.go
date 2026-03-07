@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 	"time"
+
+	"pulse-stream/api-service/internal/kafka"
 )
 
 type PostEvent struct {
@@ -15,9 +18,13 @@ type PostEvent struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-func createPostHandler(w http.ResponseWriter, r *http.Request) {
+type App struct {
+	producer *kafka.Producer
+}
+
+func (a *App) createPostHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -39,17 +46,39 @@ func createPostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	kafkaEvent := kafka.PostEvent{
+		PostID: event.PostID,
+		Platform: event.Platform,
+		ContentType: event.ContentType,
+		EngagementScore: event.EngagementScore,
+		CreatedAt: event.CreatedAt,
+	}
+
+	err = a.producer.PublishPostEvent(context.Background(), kafkaEvent)
+	if err != nil {
+		log.Printf("failed to publish event: %v\n", err)
+		http.Error(w, "failed to publish event", http.StatusInternalServerError)
+		return
+	}
+
 	log.Printf("Received post event: %+v\n", event)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(`{"status": "accepted"}`))
+	w.Write([]byte(`{"status": "accepted and published"}`))
 
 }
 
 func main() {
+	producer := kafka.NewProducer("localhost:9092", "post-events")
+	defer producer.Close()
+	
+	app := &App{
+		producer: producer,
+	}
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("/posts", createPostHandler)
+	mux.HandleFunc("/posts", app.createPostHandler)
 
 	log.Println("API service is running on http://localhost:8080...")
 
