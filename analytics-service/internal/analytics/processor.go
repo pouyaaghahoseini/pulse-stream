@@ -1,0 +1,36 @@
+package analytics
+
+type PlatformStats struct {
+	Platform	   string
+	TotalPosts	   int
+	TotalEngagement int
+	AverageEngagement float64
+}
+
+type Processor struct {
+	TotalEvents int
+	PlatformStats map[string]*PlatformStats
+}
+
+func NewProcessor() *Processor {
+	return &Processor{
+		TotalEvents: 0,
+		PlatformStats: make(map[string]*PlatformStats),
+	}
+}
+
+func (p *Processor) ProcessEvent(platform string, engagementScore int) {
+	p.TotalEvents++
+
+	stats, exists := p.PlatformStats[platform]
+	if !exists {
+		stats = &PlatformStats{
+			Platform: platform,
+		}
+		p.PlatformStats[platform] = stats
+	}
+
+	stats.TotalPosts++
+	stats.TotalEngagement += engagementScore
+	stats.AverageEngagement = float64(stats.TotalEngagement) / float64(stats.TotalPosts)
+}

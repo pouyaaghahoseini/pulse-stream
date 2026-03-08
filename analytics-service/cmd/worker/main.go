@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"pulse-stream/analytics-service/internal/analytics"
 	kafkago "github.com/segmentio/kafka-go"
 )
 
@@ -26,28 +27,36 @@ func main() {
 
 	defer reader.Close()
 
-	log.Println("Analytics worker started, waiting for messages...")
+	processor := analytics.NewProcessor()
+
+	log.Println("Analytics service is listening for events on topic: post-events")
 
 	for {
 		message, err := reader.ReadMessage(context.Background())
 		if err != nil {
-			log.Printf("Error reading message: %v\n", err)
+			log.Printf("Failed to read message: %v\n", err)
 			continue
 		}
 
 		var event PostEvent
 		err = json.Unmarshal(message.Value, &event)
 		if err != nil {
-			log.Printf("Error unmarshaling message: %v\n", err)
+			log.Printf("Failed to unmarshal message: %v\n", err)
 			continue
 		}
 
-		log.Printf(
-			"consumed message topic=%s partition=%d offset=%d event=%+v\n",
-			message.Topic,
-			message.Partition,
-			message.Offset,
-			event,
-		)
+		processor.ProcessEvent(event.Platform, event.EngagementScore)
+
+		log.Printf("processed event: %+v\n", event)
+		log.Printf("total events processed: %d\n", processor.TotalEvents)
+
+		for platform, stats := range processor.PlatformStats {
+			log.Printf("Platform: %s, Total Posts: %d, Total Engagement: %d, Average Engagement: %.2f\n",
+				platform, 
+				stats.TotalPosts,
+				stats.TotalEngagement, 
+				stats.AverageEngagement,
+			)
+		}
 	}
 }
