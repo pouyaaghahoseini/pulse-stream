@@ -7,15 +7,16 @@ import (
 	"time"
 
 	"pulse-stream/analytics-service/internal/analytics"
+	"pulse-stream/analytics-service/internal/store"
 	kafkago "github.com/segmentio/kafka-go"
 )
 
 type PostEvent struct {
-	PostID		  string    `json:"post_id"`
-	Platform	  string    `json:"platform"`
-	ContentType	  string    `json:"content_type"`
+	PostID          string    `json:"post_id"`
+	Platform        string    `json:"platform"`
+	ContentType     string    `json:"content_type"`
 	EngagementScore int       `json:"engagement_score"`
-	CreatedAt	  time.Time `json:"created_at"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 func main() {
@@ -24,8 +25,14 @@ func main() {
 		Topic:   "post-events",
 		GroupID: "analytics-service-group",
 	})
-
 	defer reader.Close()
+
+	connectionString := "postgres://postgres:postgres@localhost:5432/pulsestream?sslmode=disable"
+	dbStore, err := store.NewPostgresStore(connectionString)
+	if err != nil {
+		log.Fatalf("failed to connect to Postgres: %v", err)
+	}
+	defer dbStore.Close()
 
 	processor := analytics.NewProcessor()
 
@@ -34,29 +41,37 @@ func main() {
 	for {
 		message, err := reader.ReadMessage(context.Background())
 		if err != nil {
-			log.Printf("Failed to read message: %v\n", err)
+			log.Printf("failed to read message: %v\n", err)
 			continue
 		}
 
 		var event PostEvent
 		err = json.Unmarshal(message.Value, &event)
 		if err != nil {
-			log.Printf("Failed to unmarshal message: %v\n", err)
+			log.Printf("failed to unmarshal message: %v\n", err)
 			continue
 		}
 
-		processor.ProcessEvent(event.Platform, event.EngagementScore)
+		updatedStats := processor.ProcessEvent(event.Platform, event.EngagementScore)
 
-		log.Printf("processed event: %+v\n", event)
-		log.Printf("total events processed: %d\n", processor.TotalEvents)
-
-		for platform, stats := range processor.PlatformStats {
-			log.Printf("Platform: %s, Total Posts: %d, Total Engagement: %d, Average Engagement: %.2f\n",
-				platform, 
-				stats.TotalPosts,
-				stats.TotalEngagement, 
-				stats.AverageEngagement,
-			)
+		err = dbStore.UpsertPlatformStats(store.PlatformStats{
+			Platform:        updatedStats.Platform,
+			TotalPosts:      updatedStats.TotalPosts,
+			TotalEngagement: updatedStats.TotalEngagement,
+			AverageScore:    updatedStats.AverageScore,
+		})
+		if err != nil {
+			log.Printf("failed to save stats to Postgres: %v\n", err)
+			continue
 		}
+
+		log.Printf("processed and saved event: %+v\n", event)
+		log.Printf(
+			"saved stats: platform=%s total_posts=%d total_engagement=%d average_score=%.2f\n",
+			updatedStats.Platform,
+			updatedStats.TotalPosts,
+			updatedStats.TotalEngagement,
+			updatedStats.AverageScore,
+		)
 	}
 }
