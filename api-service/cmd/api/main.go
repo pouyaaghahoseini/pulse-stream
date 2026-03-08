@@ -8,18 +8,20 @@ import (
 	"time"
 
 	"pulse-stream/api-service/internal/kafka"
+	"pulse-stream/api-service/internal/store"
 )
 
 type PostEvent struct {
-	PostID	string    `json:"post_id"`
-	Platform string	`json:"platform"`
-	ContentType string `json:"content_type"`
-	EngagementScore int 	 `json:"engagement_score"`
-	CreatedAt time.Time `json:"created_at"`
+	PostID          string    `json:"post_id"`
+	Platform        string    `json:"platform"`
+	ContentType     string    `json:"content_type"`
+	EngagementScore int       `json:"engagement_score"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 type App struct {
 	producer *kafka.Producer
+	store    *store.PostgresStore
 }
 
 func (a *App) createPostHandler(w http.ResponseWriter, r *http.Request) {
@@ -32,26 +34,26 @@ func (a *App) createPostHandler(w http.ResponseWriter, r *http.Request) {
 
 	err := json.NewDecoder(r.Body).Decode(&event)
 	if err != nil {
-		http.Error(w, "Bad request", http.StatusBadRequest)
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
 
 	if event.PostID == "" || event.Platform == "" || event.ContentType == "" {
-		http.Error(w, "Missing required fields", http.StatusBadRequest)
+		http.Error(w, "missing required fields", http.StatusBadRequest)
 		return
 	}
 
 	if event.EngagementScore < 0 {
-		http.Error(w, "Engagement score must be non-negative", http.StatusBadRequest)
+		http.Error(w, "engagement_score cannot be negative", http.StatusBadRequest)
 		return
 	}
 
 	kafkaEvent := kafka.PostEvent{
-		PostID: event.PostID,
-		Platform: event.Platform,
-		ContentType: event.ContentType,
+		PostID:          event.PostID,
+		Platform:        event.Platform,
+		ContentType:     event.ContentType,
 		EngagementScore: event.EngagementScore,
-		CreatedAt: event.CreatedAt,
+		CreatedAt:       event.CreatedAt,
 	}
 
 	err = a.producer.PublishPostEvent(context.Background(), kafkaEvent)
@@ -61,28 +63,58 @@ func (a *App) createPostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Received post event: %+v\n", event)
+	log.Printf("published event to Kafka: %+v\n", event)
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(`{"status": "accepted and published"}`))
+	w.WriteHeader(http.StatusAccepted)
+	w.Write([]byte(`{"status":"accepted and published"}`))
+}
 
+func (a *App) getPlatformAnalyticsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	results, err := a.store.GetAllPlatformAnalytics()
+	if err != nil {
+		log.Printf("failed to fetch analytics: %v\n", err)
+		http.Error(w, "failed to fetch analytics", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	err = json.NewEncoder(w).Encode(results)
+	if err != nil {
+		log.Printf("failed to encode analytics response: %v\n", err)
+		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+		return
+	}
 }
 
 func main() {
 	producer := kafka.NewProducer("localhost:9092", "post-events")
 	defer producer.Close()
-	
+
+	connectionString := "postgres://postgres:postgres@localhost:5432/pulsestream?sslmode=disable"
+	dbStore, err := store.NewPostgresStore(connectionString)
+	if err != nil {
+		log.Fatalf("failed to connect to Postgres: %v", err)
+	}
+	defer dbStore.Close()
+
 	app := &App{
 		producer: producer,
+		store:    dbStore,
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/posts", app.createPostHandler)
+	mux.HandleFunc("/analytics/platforms", app.getPlatformAnalyticsHandler)
 
-	log.Println("API service is running on http://localhost:8080...")
+	log.Println("API service running on http://localhost:8080")
 
-	err := http.ListenAndServe(":8080", mux)
+	err = http.ListenAndServe(":8080", mux)
 	if err != nil {
 		log.Fatal(err)
 	}
