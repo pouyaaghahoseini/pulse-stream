@@ -38,3 +38,18 @@ services:
       POSTGRES_PASSWORD: postgres
     ports:
       - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: pulse-prometheus
+    ports:
+    - "9090:9090"
+    volumes:
+    - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+
+volumes:
+  postgres_data:
