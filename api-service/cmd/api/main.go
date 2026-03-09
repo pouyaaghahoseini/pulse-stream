@@ -10,6 +10,8 @@ import (
 	"pulse-stream/api-service/internal/kafka"
 	"pulse-stream/api-service/internal/store"
 	"pulse-stream/api-service/internal/validation"
+	"pulse-stream/api-service/internal/metrics"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type PostEvent struct {
@@ -23,6 +25,7 @@ type PostEvent struct {
 type App struct {
 	producer *kafka.Producer
 	store    *store.PostgresStore
+	metrics  *metrics.Metrics
 }
 
 func (a *App) createPostHandler(w http.ResponseWriter, r *http.Request) {
@@ -30,6 +33,8 @@ func (a *App) createPostHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	a.metrics.HTTPRequestsTotal.Inc()
 
 	var event PostEvent
 
@@ -60,11 +65,13 @@ func (a *App) createPostHandler(w http.ResponseWriter, r *http.Request) {
 
 	err = a.producer.PublishPostEvent(context.Background(), kafkaEvent)
 	if err != nil {
+		a.metrics.KafkaPublishFailureTotal.Inc()
 		log.Printf("failed to publish event: %v\n", err)
 		http.Error(w, "failed to publish event", http.StatusInternalServerError)
 		return
 	}
 
+	a.metrics.KafkaPublishSuccessTotal.Inc()
 	log.Printf("published event to Kafka: %+v\n", event)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -105,14 +112,18 @@ func main() {
 	}
 	defer dbStore.Close()
 
+	appMetrics := metrics.NewMetrics()
+
 	app := &App{
 		producer: producer,
 		store:    dbStore,
+		metrics:  appMetrics,
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/posts", app.createPostHandler)
 	mux.HandleFunc("/analytics/platforms", app.getPlatformAnalyticsHandler)
+	mux.Handle("/metrics", promhttp.Handler())
 
 	log.Println("API service running on http://localhost:8080")
 

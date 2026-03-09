@@ -8,6 +8,9 @@ import (
 
 	"pulse-stream/analytics-service/internal/analytics"
 	"pulse-stream/analytics-service/internal/store"
+	"net/http"
+	"pulse-stream/analytics-service/internal/metrics"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	kafkago "github.com/segmentio/kafka-go"
 )
 
@@ -26,17 +29,27 @@ func main() {
 		GroupID: "analytics-service-group",
 	})
 	defer reader.Close()
-
+	
 	connectionString := "postgres://postgres:postgres@localhost:5432/pulsestream?sslmode=disable"
 	dbStore, err := store.NewPostgresStore(connectionString)
 	if err != nil {
 		log.Fatalf("failed to connect to Postgres: %v", err)
 	}
 	defer dbStore.Close()
-
+	
 	processor := analytics.NewProcessor()
+	workerMetrics := metrics.NewMetrics()
 
 	log.Println("Analytics service is listening for events on topic: post-events")
+
+	go func() {
+		http.Handle("/metrics", promhttp.Handler())
+		log.Println("Metrics server running on http://localhost:8081/metrics")
+		err := http.ListenAndServe(":8081", nil)
+		if err != nil {
+			log.Fatalf("failed to start metrics server: %v", err)
+		}
+	}()
 
 	for {
 		message, err := reader.ReadMessage(context.Background())
@@ -48,10 +61,13 @@ func main() {
 		var event PostEvent
 		err = json.Unmarshal(message.Value, &event)
 		if err != nil {
+			workerMetrics.UnmarshalFailureTotal.Inc()
 			log.Printf("failed to unmarshal message: %v\n", err)
 			continue
 		}
 
+		workerMetrics.EventsConsumedTotal.Inc()
+		
 		updatedStats := processor.ProcessEvent(event.Platform, event.EngagementScore)
 
 		err = dbStore.UpsertPlatformStats(store.PlatformStats{
@@ -61,6 +77,7 @@ func main() {
 			AverageScore:    updatedStats.AverageScore,
 		})
 		if err != nil {
+			workerMetrics.DatabaseWriteFailureTotal.Inc()
 			log.Printf("failed to save stats to Postgres: %v\n", err)
 			continue
 		}
