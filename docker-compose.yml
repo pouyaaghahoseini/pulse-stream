@@ -1,6 +1,7 @@
 version: "3.8"
 
 services:
+
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
     container_name: pulse-zookeeper
@@ -59,8 +60,32 @@ services:
       - "3000:3000"
     depends_on:
       - prometheus
+    environment:
+      - GF_SECURITY_ADMIN_USER:=admin
+      - GF_SECURITY_ADMIN_PASSWORD=password
     volumes:
       - grafana_data:/var/lib/grafana
+
+  api-service:
+    build: ./api-service
+    container_name: pulse-api-service
+    depends_on:
+      - kafka
+      - postgres
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  analytics-service:
+    build:
+      context: ./analytics-service
+    container_name: pulse-analytics-service
+    depends_on:
+      - kafka
+      - postgres
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
 
 volumes:
   postgres_data:

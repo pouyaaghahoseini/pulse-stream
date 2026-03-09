@@ -24,13 +24,13 @@ type PostEvent struct {
 
 func main() {
 	reader := kafkago.NewReader(kafkago.ReaderConfig{
-		Brokers: []string{"localhost:9092"},
+		Brokers: []string{"kafka:29092"},
 		Topic:   "post-events",
 		GroupID: "analytics-service-group",
 	})
 	defer reader.Close()
 	
-	connectionString := "postgres://postgres:postgres@localhost:5432/pulsestream?sslmode=disable"
+	connectionString := "postgres://postgres:postgres@postgres:5432/pulsestream?sslmode=disable"
 	dbStore, err := store.NewPostgresStore(connectionString)
 	if err != nil {
 		log.Fatalf("failed to connect to Postgres: %v", err)
@@ -67,7 +67,7 @@ func main() {
 		}
 
 		workerMetrics.EventsConsumedTotal.Inc()
-		
+
 		updatedStats := processor.ProcessEvent(event.Platform, event.EngagementScore)
 
 		err = dbStore.UpsertPlatformStats(store.PlatformStats{

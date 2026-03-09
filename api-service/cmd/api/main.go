@@ -102,10 +102,10 @@ func (a *App) getPlatformAnalyticsHandler(w http.ResponseWriter, r *http.Request
 }
 
 func main() {
-	producer := kafka.NewProducer("localhost:9092", "post-events")
+	producer := kafka.NewProducer("kafka:29092", "post-events")
 	defer producer.Close()
 
-	connectionString := "postgres://postgres:postgres@localhost:5432/pulsestream?sslmode=disable"
+	connectionString := "postgres://postgres:postgres@postgres:5432/pulsestream?sslmode=disable"
 	dbStore, err := store.NewPostgresStore(connectionString)
 	if err != nil {
 		log.Fatalf("failed to connect to Postgres: %v", err)
