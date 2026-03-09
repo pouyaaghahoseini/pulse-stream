@@ -9,6 +9,7 @@ import (
 
 	"pulse-stream/api-service/internal/kafka"
 	"pulse-stream/api-service/internal/store"
+	"pulse-stream/api-service/internal/validation"
 )
 
 type PostEvent struct {
@@ -38,13 +39,14 @@ func (a *App) createPostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if event.PostID == "" || event.Platform == "" || event.ContentType == "" {
-		http.Error(w, "missing required fields", http.StatusBadRequest)
-		return
-	}
-
-	if event.EngagementScore < 0 {
-		http.Error(w, "engagement_score cannot be negative", http.StatusBadRequest)
+	err = validation.ValidatePostEvent(validation.PostEvent{
+		PostID:          event.PostID,
+		Platform:        event.Platform,
+		ContentType:     event.ContentType,
+		EngagementScore: event.EngagementScore,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
